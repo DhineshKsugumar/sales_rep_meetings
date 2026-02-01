@@ -1,9 +1,881 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="UTF-8">
-  </head>
-  <body>
-    <h2>This is a sample Widget built using Zoho Extension toolkit.</h2>
-  </body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Meetings</title>
+  <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f5f5;
+      color: #1a1a1a;
+      font-size: 15px;
+      line-height: 1.4;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .loader-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(255,255,255,0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .loader-overlay.hidden { display: none; }
+    .loader {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #e0e0e0;
+      border-top-color: #2563eb;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .app {
+      max-width: 100%;
+      min-height: 100vh;
+      padding: 12px;
+      padding-bottom: 24px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn {
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      font-size: 14px;
+      font-weight: 500;
+      color: #374151;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:active { background: #f3f4f6; }
+    .btn-primary {
+      background: #2563eb;
+      color: #fff;
+      border-color: #2563eb;
+    }
+    .btn-primary:active { background: #1d4ed8; }
+    .btn-icon {
+      padding: 10px;
+      min-width: 44px;
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .search-row {
+      margin-bottom: 12px;
+    }
+    .search-row input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 16px;
+      color: #1a1a1a;
+      background: #fff;
+      min-height: 44px;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .search-row input::placeholder {
+      color: #9ca3af;
+    }
+
+    .filter-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .filter-row label {
+      font-size: 13px;
+      color: #6b7280;
+      font-weight: 500;
+    }
+    .filter-row select {
+      flex: 1;
+      min-width: 120px;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+      font-size: 14px;
+      color: #1a1a1a;
+      -webkit-appearance: none;
+      appearance: none;
+      min-height: 44px;
+    }
+
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      padding: 14px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    .card-title {
+      margin: 0 0 8px 0;
+      font-size: 15px;
+      font-weight: 600;
+      color: #1a1a1a;
+      word-break: break-word;
+    }
+    .card-title a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+    .card-title a:active { opacity: 0.8; }
+    .card-meta {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 12px;
+    }
+    .card-stage {
+      margin-top: 12px;
+    }
+    .card-stage label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: #6b7280;
+      margin-bottom: 6px;
+    }
+    .card-stage select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+      font-size: 14px;
+      color: #1a1a1a;
+      min-height: 44px;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .card-more {
+      margin-top: 12px;
+      font-size: 13px;
+    }
+    .card-more a {
+      color: #2563eb;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .card-more a:active { opacity: 0.8; }
+
+    .footer-actions {
+      position: sticky;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 16px 12px;
+      padding-bottom: max(16px, env(safe-area-inset-bottom));
+      background: #f5f5f5;
+      border-top: 1px solid #e5e7eb;
+      margin: 24px -12px -24px -12px;
+    }
+    .footer-actions .btn {
+      width: 100%;
+      min-height: 48px;
+      font-size: 16px;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 48px 24px;
+      color: #6b7280;
+      font-size: 15px;
+    }
+    .count {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 12px;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal {
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      width: 100%;
+      max-width: 360px;
+    }
+    .modal h2 {
+      margin: 0 0 16px 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    .modal .field {
+      margin-bottom: 12px;
+    }
+    .modal .field label {
+      display: block;
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 4px;
+    }
+    .modal .field input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 14px;
+      min-height: 44px;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 20px;
+    }
+    .modal-actions .btn { flex: 1; }
+
+    .detail-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      overflow-y: auto;
+    }
+    .detail-overlay.hidden { display: none; }
+    .detail-modal {
+      position: relative;
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      width: 100%;
+      max-width: 400px;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+    .detail-modal h2 {
+      margin: 0 0 16px 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+      padding-right: 36px;
+    }
+    .detail-modal .close-btn {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      font-size: 1.5rem;
+      line-height: 1;
+      color: #6b7280;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .detail-modal .close-btn:active { color: #1a1a1a; }
+    .detail-body { font-size: 14px; }
+    .detail-row {
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .detail-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+    .detail-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: #6b7280;
+      margin-bottom: 2px;
+    }
+    .detail-value {
+      color: #1a1a1a;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <div id="loaderOverlay" class="loader-overlay">
+    <div class="loader"></div>
+  </div>
+
+  <div class="app">
+    <header class="header">
+      <h1 id="headerTitle">Meetings</h1>
+      <div class="header-actions">
+        <button type="button" class="btn btn-icon" id="refreshBtn" title="Refresh">Refresh</button>
+      </div>
+    </header>
+
+    <div class="search-row">
+      <input type="search" id="globalSearch" placeholder="Search meetings..." autocomplete="off" />
+    </div>
+
+    <div class="filter-row">
+      <label for="dateFilter">Date</label>
+      <select id="dateFilter">
+        <option value="today">Today</option>
+        <option value="yesterday">Yesterday</option>
+        <option value="tomorrow">Tomorrow</option>
+        <option value="between">Date range</option>
+      </select>
+    </div>
+
+    <p class="count" id="count"></p>
+    <div class="list" id="meetingList"></div>
+
+    <div class="footer-actions">
+      <button type="button" class="btn btn-primary" id="saveBtn">Save changes</button>
+    </div>
+  </div>
+
+  <div id="detailOverlay" class="detail-overlay hidden">
+    <div class="detail-modal" id="detailModal">
+      <button type="button" class="close-btn" id="detailClose" aria-label="Close">&times;</button>
+      <h2 id="detailTitle">Meeting details</h2>
+      <div class="detail-body" id="detailBody"></div>
+    </div>
+  </div>
+
+  <div id="betweenOverlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Date range</h2>
+      <div class="field">
+        <label for="startDate">Start</label>
+        <input type="date" id="startDate" />
+      </div>
+      <div class="field">
+        <label for="endDate">End</label>
+        <input type="date" id="endDate" />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="betweenCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="betweenApply">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const meetingStages = [
+      'None',
+      'Issued Appointment',
+      'Meeting Acknowledged',
+      'Full Demo Financial TD',
+      'Full Demo No Sale',
+      'ID - Not Interested',
+      'ID - Ran OutofTime',
+      'One Leg',
+      'Customer no show',
+      'Cancelled - Rescheduled',
+      'Cancelled - Not Rescheduled',
+      'DNC',
+      'Cancelled because unconfirmed',
+      'Contract Signed',
+      'Can Save',
+      'No Rep Available'
+    ];
+
+    let currentData = [];
+    let zohoSDKReady = false;
+    let currentFilter = 'today';
+    let currentSearchQuery = '';
+
+    function showLoader(show) {
+      const el = document.getElementById('loaderOverlay');
+      if (el) el.classList.toggle('hidden', !show);
+    }
+
+    function setLoaderMessage(msg) {
+      const el = document.getElementById('loaderOverlay');
+      if (!el) return;
+      el.innerHTML = msg ? `<div style="font-size:14px;color:#374151;font-weight:500;">${msg}</div>` : '<div class="loader"></div>';
+    }
+
+    function getDateRangeForFilter(filter, startDateVal, endDateVal) {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      today.setHours(0, 0, 0, 0);
+
+      let startDate, endDate;
+      if (filter === 'between' && startDateVal && endDateVal) {
+        startDate = new Date(startDateVal);
+        endDate = new Date(endDateVal);
+      } else {
+        switch (filter) {
+          case 'today':
+            startDate = new Date(today);
+            endDate = new Date(today);
+            break;
+          case 'yesterday':
+            startDate = new Date(today);
+            startDate.setDate(startDate.getDate() - 1);
+            endDate = new Date(startDate);
+            break;
+          case 'tomorrow':
+            startDate = new Date(today);
+            startDate.setDate(startDate.getDate() + 1);
+            endDate = new Date(startDate);
+            break;
+          default:
+            startDate = new Date(today);
+            endDate = new Date(today);
+        }
+      }
+
+      const format = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      };
+      return { start: format(startDate), end: format(endDate) };
+    }
+
+    function formatDateInEST(dateString) {
+      if (!dateString) return '-';
+      try {
+        const match = dateString.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+        if (!match) {
+          const date = new Date(dateString);
+          return date.toLocaleString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true });
+        }
+        const [, year, month, day, hourStr, minuteStr] = match;
+        const hour = parseInt(hourStr, 10);
+        const minute = parseInt(minuteStr, 10);
+        const hour12 = hour === 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+        const ampm = hour >= 12 ? 'PM' : 'AM';
+        return `${month}/${day}/${year}, ${String(hour12).padStart(2, '0')}:${minuteStr} ${ampm}`;
+      } catch (e) {
+        return '-';
+      }
+    }
+
+    async function fetchMeetings(startDate, endDate) {
+      if (!zohoSDKReady || !ZOHO.CRM || !ZOHO.CRM.API || !ZOHO.CRM.API.coql) {
+        throw new Error('Zoho SDK not ready');
+      }
+
+      const startDateTime = `${startDate}T00:00:00-05:00`;
+      const endDateTime = `${endDate}T23:59:59-05:00`;
+      const query = `select id,Event_Title,Meeting_Stage,Start_DateTime,End_DateTime,Who_Id,What_Id,Sales_Rep,Sales_Rep_2,Trainee,Venue,Description,District from Events where Start_DateTime between '${startDateTime}' and '${endDateTime}' limit 200`;
+
+      const allMeetings = [];
+      let page = 1;
+      const pageSize = 25;
+      let hasMore = true;
+
+      while (hasMore) {
+        const offset = (page - 1) * pageSize;
+        const coqlQuery = { select_query: query.replace('limit 200', `limit ${pageSize} offset ${offset}`) };
+        const response = await ZOHO.CRM.API.coql(coqlQuery);
+
+        if (response && response.data && response.data.length > 0) {
+          allMeetings.push(...response.data);
+          hasMore = response.info && response.info.more_records === true && response.data.length === pageSize;
+        } else {
+          hasMore = false;
+        }
+        page++;
+        if (page > 50) break;
+        if (hasMore) await new Promise(r => setTimeout(r, 150));
+      }
+
+      const transformed = [];
+      for (const m of allMeetings) {
+        if (!m.Start_DateTime) continue;
+        let accountId = null;
+        let accountName = '';
+        if (m.What_Id) {
+          if (typeof m.What_Id === 'object') {
+            accountId = m.What_Id.id;
+            accountName = m.What_Id.name || '';
+          } else {
+            accountId = m.What_Id;
+          }
+        }
+        transformed.push({
+          id: m.id,
+          stage: m.Meeting_Stage || '',
+          meetingTitle: m.Event_Title || '-',
+          from: formatDateInEST(m.Start_DateTime),
+          startDateTime: m.Start_DateTime,
+          salesRep: m.Sales_Rep || '',
+          salesRep2: m.Sales_Rep_2 || '',
+          trainee: m.Trainee || '',
+          accountId,
+          addressName: accountName || m.Event_Title || '-',
+          description: m.Description || '',
+          district: m.District || '',
+          venue: m.Venue || ''
+        });
+      }
+      return transformed.filter(function (row) {
+        const a = (row.salesRep || '').trim();
+        const b = (row.salesRep2 || '').trim();
+        const c = (row.trainee || '').trim();
+        return a !== '' || b !== '' || c !== '';
+      });
+    }
+
+    function buildSearchText(row) {
+      const parts = [
+        row.meetingTitle || '',
+        row.from || '',
+        row.stage || '',
+        row.addressName || '',
+        row.salesRep || '',
+        row.salesRep2 || '',
+        row.trainee || '',
+        row.description || '',
+        row.district || '',
+        row.venue || ''
+      ];
+      return parts.join(' ').toLowerCase().replace(/\s+/g, ' ').trim();
+    }
+
+    function escapeHtml(str) {
+      if (str == null || str === '') return '';
+      const s = String(str);
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function renderList(data) {
+      const listEl = document.getElementById('meetingList');
+      const countEl = document.getElementById('count');
+      if (!listEl) return;
+
+      if (data.length === 0) {
+        listEl.innerHTML = '<div class="empty">No meetings for this date.</div>';
+        countEl.textContent = '';
+        return;
+      }
+
+      const sorted = [...data].sort((a, b) => (a.startDateTime || '').localeCompare(b.startDateTime || ''));
+
+      listEl.innerHTML = sorted.map(row => {
+        const stageVal = row.stage === 'None' || !row.stage ? '' : row.stage;
+        const options = meetingStages.map(s => {
+          const v = s === 'None' ? '' : s;
+          const sel = (row.stage || 'None') === s ? ' selected' : '';
+          return '<option value="' + escapeHtml(v) + '"' + sel + '>' + escapeHtml(s) + '</option>';
+        }).join('');
+        const title = escapeHtml(row.meetingTitle || '-');
+        const searchText = escapeHtml(buildSearchText(row));
+        const origStage = escapeHtml(row.stage || '');
+        return '<div class="card" data-id="' + row.id + '" data-original-stage="' + origStage + '" data-search-text="' + searchText + '">' +
+          '<h2 class="card-title">' + title + '</h2>' +
+          '<p class="card-meta">' + escapeHtml(row.from) + '</p>' +
+          '<div class="card-stage">' +
+          '<label>Stage</label>' +
+          '<select name="meeting_stage" data-original-value="' + escapeHtml(stageVal) + '">' + options + '</select>' +
+          '</div>' +
+          '<div class="card-more"><a href="#" data-id="' + row.id + '" class="more-info-link">More Info</a></div>' +
+          '</div>';
+      }).join('');
+
+      applySearchFilter(currentSearchQuery);
+      attachMoreInfoHandlers();
+    }
+
+    function applySearchFilter(query) {
+      const listEl = document.getElementById('meetingList');
+      const countEl = document.getElementById('count');
+      if (!listEl || !countEl) return;
+
+      const cards = listEl.querySelectorAll('.card[data-search-text]');
+      const q = (query || '').toLowerCase().trim();
+      let visible = 0;
+      cards.forEach(card => {
+        const text = (card.getAttribute('data-search-text') || '').toLowerCase();
+        const show = !q || text.indexOf(q) !== -1;
+        card.style.display = show ? '' : 'none';
+        if (show) visible++;
+      });
+
+      const total = cards.length;
+      if (total === 0) return;
+      if (q) {
+        countEl.textContent = 'Showing ' + visible + ' of ' + total + ' meeting' + (total !== 1 ? 's' : '');
+      } else {
+        countEl.textContent = total + ' meeting' + (total !== 1 ? 's' : '');
+      }
+    }
+
+    function attachMoreInfoHandlers() {
+      document.querySelectorAll('.more-info-link').forEach(link => {
+        link.addEventListener('click', function (e) {
+          e.preventDefault();
+          const id = this.getAttribute('data-id');
+          const row = currentData.find(r => String(r.id) === String(id));
+          if (row) {
+            const card = document.querySelector('.card[data-id="' + id + '"]');
+            let stage = row.stage || '';
+            if (card) {
+              const sel = card.querySelector('select[name="meeting_stage"]');
+              if (sel) stage = sel.value.trim() || 'None';
+            }
+            showDetail(row, stage);
+          }
+        });
+      });
+    }
+
+    function showDetail(row, currentStage) {
+      const stage = currentStage !== undefined ? currentStage : (row.stage || '-');
+      const fields = [
+        { label: 'Meeting title', value: row.meetingTitle || '-' },
+        { label: 'Date and time', value: row.from || '-' },
+        { label: 'Stage', value: stage || '-' },
+        { label: 'Address / Account', value: row.addressName || '-' },
+        { label: 'Sales rep', value: row.salesRep || '-' },
+        { label: 'Sales rep 2', value: row.salesRep2 || '-' },
+        { label: 'Trainee', value: row.trainee || '-' },
+        { label: 'Venue', value: row.venue || '-' },
+        { label: 'District', value: row.district || '-' },
+        { label: 'Description', value: row.description || '-' }
+      ];
+      const titleEl = document.getElementById('detailTitle');
+      const bodyEl = document.getElementById('detailBody');
+      if (titleEl) titleEl.textContent = row.meetingTitle || 'Meeting details';
+      if (bodyEl) {
+        bodyEl.innerHTML = fields.map(f => '<div class="detail-row">' +
+          '<div class="detail-label">' + escapeHtml(f.label) + '</div>' +
+          '<div class="detail-value">' + escapeHtml(f.value) + '</div>' +
+          '</div>').join('');
+      }
+      document.getElementById('detailOverlay').classList.remove('hidden');
+    }
+
+    function closeDetail() {
+      document.getElementById('detailOverlay').classList.add('hidden');
+    }
+
+    async function loadData(filter, startDate, endDate) {
+      showLoader(true);
+      try {
+        const range = getDateRangeForFilter(filter, startDate, endDate);
+        currentData = await fetchMeetings(range.start, range.end);
+        renderList(currentData);
+        document.getElementById('globalSearch').value = currentSearchQuery;
+      } catch (err) {
+        console.error(err);
+        alert('Error loading data: ' + (err.message || err));
+      } finally {
+        showLoader(false);
+        setLoaderMessage('');
+      }
+    }
+
+    async function updateRecordsInCRM(updates) {
+      if (!zohoSDKReady || !ZOHO.CRM || !ZOHO.CRM.API || !ZOHO.CRM.API.updateRecord) return { success: 0, failed: 0 };
+
+      let successCount = 0;
+      let failedCount = 0;
+
+      for (const u of updates) {
+        try {
+          const updateData = {
+            id: u.id,
+            Meeting_Stage: u.meeting_stage === 'None' ? '' : u.meeting_stage,
+            Sales_Rep: u.sales_rep === 'None' ? '' : u.sales_rep,
+            Sales_Rep_2: u.Salesrep2 === 'None' ? '' : u.Salesrep2,
+            Trainee: u.trainee === 'None' ? '' : u.trainee
+          };
+          const response = await ZOHO.CRM.API.updateRecord({
+            Entity: 'Events',
+            APIData: updateData
+          });
+
+          if (response && response.data && response.data[0] && response.data[0].status === 'success') {
+            successCount++;
+            const card = document.querySelector(`.card[data-id="${u.id}"]`);
+            if (card) {
+              const sel = card.querySelector('select[name="meeting_stage"]');
+              if (sel) sel.setAttribute('data-original-value', u.meeting_stage === 'None' ? '' : u.meeting_stage);
+            }
+            if (ZOHO.CRM && ZOHO.CRM.FUNCTIONS) {
+              const meetingIdStr = String(u.id);
+              if (u.sales_rep !== u.original_sales_rep) {
+                ZOHO.CRM.FUNCTIONS.execute('sendsalesrepnotification', {
+                  arguments: JSON.stringify({ meeting_id: meetingIdStr, meeting_sales_rep: u.sales_rep === 'None' ? '' : u.sales_rep })
+                }).catch(e => console.error('sendsalesrepnotification', e));
+              }
+              if (u.Salesrep2 !== u.original_Salesrep2) {
+                ZOHO.CRM.FUNCTIONS.execute('sendsalesrepnotification1', {
+                  arguments: JSON.stringify({ meeting_id: meetingIdStr, meeting_sales_rep: u.Salesrep2 === 'None' ? '' : u.Salesrep2 })
+                }).catch(e => console.error('sendsalesrepnotification1', e));
+              }
+            }
+          } else {
+            failedCount++;
+          }
+        } catch (e) {
+          failedCount++;
+          console.error('Update failed', u.id, e);
+        }
+      }
+
+      return { success: successCount, failed: failedCount };
+    }
+
+    function collectUpdates() {
+      const cards = document.querySelectorAll('.card[data-id]');
+      const updates = [];
+      cards.forEach(card => {
+        const id = card.getAttribute('data-id');
+        const select = card.querySelector('select[name="meeting_stage"]');
+        if (!id || !select) return;
+
+        const meeting_stage = select.value.trim() || 'None';
+        const original = select.getAttribute('data-original-value') || '';
+        const original_stage = original === '' ? 'None' : original;
+        if (meeting_stage === original_stage) return;
+
+        const row = currentData.find(r => String(r.id) === String(id));
+        updates.push({
+          id,
+          meeting_stage,
+          sales_rep: (row && row.salesRep) || '',
+          Salesrep2: (row && row.salesRep2) || '',
+          trainee: (row && row.trainee) || '',
+          original_sales_rep: (row && row.salesRep) || '',
+          original_Salesrep2: (row && row.salesRep2) || ''
+        });
+      });
+      return updates;
+    }
+
+    document.getElementById('globalSearch').addEventListener('input', function () {
+      currentSearchQuery = this.value.trim();
+      applySearchFilter(currentSearchQuery);
+    });
+
+    document.getElementById('dateFilter').addEventListener('change', function () {
+      if (this.value === 'between') {
+        document.getElementById('betweenOverlay').classList.remove('hidden');
+      } else {
+        currentFilter = this.value;
+        loadData(currentFilter);
+      }
+    });
+
+    document.getElementById('detailClose').addEventListener('click', closeDetail);
+    document.getElementById('detailOverlay').addEventListener('click', function (e) {
+      if (e.target === this) closeDetail();
+    });
+
+    document.getElementById('refreshBtn').addEventListener('click', function () {
+      if (currentFilter === 'between') {
+        const start = document.getElementById('startDate').value;
+        const end = document.getElementById('endDate').value;
+        loadData('between', start, end);
+      } else {
+        loadData(currentFilter);
+      }
+    });
+
+    document.getElementById('betweenCancel').addEventListener('click', function () {
+      document.getElementById('betweenOverlay').classList.add('hidden');
+      document.getElementById('dateFilter').value = currentFilter;
+    });
+
+    document.getElementById('betweenApply').addEventListener('click', function () {
+      const start = document.getElementById('startDate').value;
+      const end = document.getElementById('endDate').value;
+      if (!start || !end) {
+        alert('Please select start and end dates.');
+        return;
+      }
+      document.getElementById('betweenOverlay').classList.add('hidden');
+      document.getElementById('dateFilter').value = 'between';
+      currentFilter = 'between';
+      loadData('between', start, end);
+    });
+
+    document.getElementById('saveBtn').addEventListener('click', async function () {
+      const updates = collectUpdates();
+      if (updates.length === 0) {
+        alert('No changes to save.');
+        return;
+      }
+
+      showLoader(true);
+      setLoaderMessage('Updating ' + updates.length + ' meeting' + (updates.length !== 1 ? 's' : '') + '...');
+      const listEl = document.getElementById('meetingList');
+      if (listEl) listEl.style.opacity = '0.6';
+
+      const { success, failed } = await updateRecordsInCRM(updates);
+
+      if (listEl) listEl.style.opacity = '1';
+      showLoader(false);
+      setLoaderMessage('');
+
+      let msg = 'Updated ' + success + ' of ' + updates.length;
+      if (failed > 0) msg += ' (' + failed + ' failed)';
+      alert(msg);
+    });
+
+    ZOHO.embeddedApp.on("PageLoad", async function () {
+      zohoSDKReady = true;
+      if (ZOHO.CRM && ZOHO.CRM.CONFIG && typeof ZOHO.CRM.CONFIG.getCurrentUser === 'function') {
+        ZOHO.CRM.CONFIG.getCurrentUser().then(function (data) {
+          const user = data && data.users && data.users[0];
+          const name = user ? (user.full_name || user.first_name || user.last_name || '') : '';
+          const titleEl = document.getElementById('headerTitle');
+          if (titleEl) titleEl.textContent = name ? name + ' - Meetings' : 'Meetings';
+        }).catch(function (err) {
+          console.log('getCurrentUser error:', err);
+          const titleEl = document.getElementById('headerTitle');
+          if (titleEl) titleEl.textContent = 'Meetings';
+        });
+      }
+      await loadData('today');
+    });
+
+    ZOHO.embeddedApp.init();
+  </script>
+</body>
 </html>
