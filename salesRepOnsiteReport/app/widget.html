@@ -360,6 +360,8 @@
         <option value="today">Today</option>
         <option value="yesterday">Yesterday</option>
         <option value="tomorrow">Tomorrow</option>
+        <option value="this-week">This week</option>
+        <option value="previous-week">Previous week</option>
         <option value="between">Date range</option>
       </select>
     </div>
@@ -422,6 +424,7 @@
     let zohoSDKReady = false;
     let currentFilter = 'today';
     let currentSearchQuery = '';
+    let currentUserName = '';
 
     function showLoader(show) {
       const el = document.getElementById('loaderOverlay');
@@ -459,6 +462,18 @@
             startDate.setDate(startDate.getDate() + 1);
             endDate = new Date(startDate);
             break;
+          case 'this-week':
+            startDate = new Date(today);
+            startDate.setDate(today.getDate() - today.getDay());
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 6);
+            break;
+          case 'previous-week':
+            startDate = new Date(today);
+            startDate.setDate(today.getDate() - today.getDay() - 7);
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 6);
+            break;
           default:
             startDate = new Date(today);
             endDate = new Date(today);
@@ -493,13 +508,23 @@
       }
     }
 
+    function getTimezoneOffsetString() {
+      const d = new Date();
+      const offsetMinutes = -d.getTimezoneOffset();
+      const hours = Math.floor(offsetMinutes / 60);
+      const mins = Math.abs(offsetMinutes % 60);
+      const sign = offsetMinutes >= 0 ? '+' : '-';
+      return sign + String(Math.abs(hours)).padStart(2, '0') + ':' + String(mins).padStart(2, '0');
+    }
+
     async function fetchMeetings(startDate, endDate) {
       if (!zohoSDKReady || !ZOHO.CRM || !ZOHO.CRM.API || !ZOHO.CRM.API.coql) {
         throw new Error('Zoho SDK not ready');
       }
 
-      const startDateTime = `${startDate}T00:00:00-05:00`;
-      const endDateTime = `${endDate}T23:59:59-05:00`;
+      const tz = getTimezoneOffsetString();
+      const startDateTime = `${startDate}T00:00:00${tz}`;
+      const endDateTime = `${endDate}T23:59:59${tz}`;
       const query = `select id,Event_Title,Meeting_Stage,Start_DateTime,End_DateTime,Who_Id,What_Id,Sales_Rep,Sales_Rep_2,Trainee,Venue,Description,District from Events where Start_DateTime between '${startDateTime}' and '${endDateTime}' limit 200`;
 
       const allMeetings = [];
@@ -693,11 +718,22 @@
       document.getElementById('detailOverlay').classList.add('hidden');
     }
 
+    function isMeetingForCurrentUser(row) {
+      const name = (currentUserName || '').trim().toLowerCase();
+      if (!name) return false;
+      const rep = (row.salesRep || '').trim().toLowerCase();
+      const rep2 = (row.salesRep2 || '').trim().toLowerCase();
+      const trainee = (row.trainee || '').trim().toLowerCase();
+      return rep === name || rep2 === name || trainee === name;
+    }
+
     async function loadData(filter, startDate, endDate) {
       showLoader(true);
       try {
         const range = getDateRangeForFilter(filter, startDate, endDate);
-        currentData = await fetchMeetings(range.start, range.end);
+        let data = await fetchMeetings(range.start, range.end);
+        data = data.filter(isMeetingForCurrentUser);
+        currentData = data;
         renderList(currentData);
         document.getElementById('globalSearch').value = currentSearchQuery;
       } catch (err) {
@@ -861,16 +897,17 @@
     ZOHO.embeddedApp.on("PageLoad", async function () {
       zohoSDKReady = true;
       if (ZOHO.CRM && ZOHO.CRM.CONFIG && typeof ZOHO.CRM.CONFIG.getCurrentUser === 'function') {
-        ZOHO.CRM.CONFIG.getCurrentUser().then(function (data) {
+        try {
+          const data = await ZOHO.CRM.CONFIG.getCurrentUser();
           const user = data && data.users && data.users[0];
-          const name = user ? (user.full_name || user.first_name || user.last_name || '') : '';
+          currentUserName = user ? (user.full_name || user.first_name || user.last_name || '').trim() : '';
           const titleEl = document.getElementById('headerTitle');
-          if (titleEl) titleEl.textContent = name ? name + ' - Meetings' : 'Meetings';
-        }).catch(function (err) {
+          if (titleEl) titleEl.textContent = currentUserName ? currentUserName + ' - Meetings' : 'Meetings';
+        } catch (err) {
           console.log('getCurrentUser error:', err);
           const titleEl = document.getElementById('headerTitle');
           if (titleEl) titleEl.textContent = 'Meetings';
-        });
+        }
       }
       await loadData('today');
     });
