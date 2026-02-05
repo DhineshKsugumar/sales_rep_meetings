@@ -64,6 +64,26 @@
       align-items: center;
       gap: 8px;
     }
+    .unlock-toggle-wrap.hidden { display: none; }
+    .unlock-toggle-wrap {
+      display: flex;
+      align-items: center;
+    }
+    .unlock-toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #374151;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .unlock-toggle-label input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
     .btn {
       padding: 10px 16px;
       border-radius: 8px;
@@ -302,6 +322,15 @@
       font-weight: 600;
       padding-right: 36px;
     }
+    .detail-modal h2 .detail-title-link {
+      color: #1a1a1a;
+      text-decoration: none;
+    }
+    .detail-modal h2 .detail-title-link:hover,
+    .detail-modal h2 .detail-title-link:active {
+      color: #2563eb;
+      text-decoration: underline;
+    }
     .detail-modal .close-btn {
       position: absolute;
       top: 16px;
@@ -335,6 +364,20 @@
       color: #1a1a1a;
       word-break: break-word;
     }
+    .detail-value a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+    .detail-value a:active { opacity: 0.8; }
+    .detail-section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #374151;
+      margin: 16px 0 8px 0;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .detail-section-title:first-child { margin-top: 0; }
   </style>
 </head>
 <body>
@@ -346,6 +389,12 @@
     <header class="header">
       <h1 id="headerTitle">Meetings</h1>
       <div class="header-actions">
+        <div id="unlockToggleWrap" class="unlock-toggle-wrap hidden">
+          <label class="unlock-toggle-label">
+            <input type="checkbox" id="unlockToggle" />
+            <span>Unlock all meetings</span>
+          </label>
+        </div>
         <button type="button" class="btn btn-icon" id="refreshBtn" title="Refresh">Refresh</button>
       </div>
     </header>
@@ -401,6 +450,9 @@
   </div>
 
   <script>
+    var ACCOUNT_LINK_BASE = 'https://crm.zoho.com/crm/thiv2m5o/tab/Accounts/';
+    var EVENT_LINK_BASE = 'https://crm.zoho.com/crm/thiv2m5o/tab/Events/';
+
     const meetingStages = [
       'None',
       'Issued Appointment',
@@ -425,6 +477,7 @@
     let currentFilter = 'today';
     let currentSearchQuery = '';
     let currentUserName = '';
+    let isLocked = true;
 
     function showLoader(show) {
       const el = document.getElementById('loaderOverlay');
@@ -448,10 +501,10 @@
         endDate = new Date(endDateVal);
       } else {
         switch (filter) {
-          case 'today':
-            startDate = new Date(today);
-            endDate = new Date(today);
-            break;
+          case 'today': {
+            var estToday = getTodayEST();
+            return { start: estToday, end: estToday };
+          }
           case 'yesterday':
             startDate = new Date(today);
             startDate.setDate(startDate.getDate() - 1);
@@ -517,48 +570,80 @@
       return sign + String(Math.abs(hours)).padStart(2, '0') + ':' + String(mins).padStart(2, '0');
     }
 
+    /** Return timezone offset for America/New_York (EST/EDT) so COQL range matches onsite report. */
+    function getESTOffsetString() {
+      try {
+        const d = new Date();
+        const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'shortOffset' });
+        const parts = formatter.formatToParts(d);
+        const tzPart = parts.find(function (p) { return p.type === 'timeZoneName'; });
+        const str = (tzPart && tzPart.value) || '';
+        var match = str.match(/UTC([+\-\u2212])(\d{1,2}):?(\d{2})?/);
+        if (match) {
+          var sign = (match[1] === '\u2212' ? '-' : match[1]);
+          var hours = String(Math.abs(parseInt(match[2], 10))).padStart(2, '0');
+          var mins = (match[3] ? String(Math.abs(parseInt(match[3], 10))).padStart(2, '0') : '00');
+          return sign + hours + ':' + mins;
+        }
+      } catch (e) { /* fallback */ }
+      return '-05:00';
+    }
+
+    /** Return today's date (YYYY-MM-DD) in America/New_York to match onsite report. */
+    function getTodayEST() {
+      const d = new Date();
+      const y = d.toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric' });
+      const m = d.toLocaleString('en-US', { timeZone: 'America/New_York', month: '2-digit' });
+      const day = d.toLocaleString('en-US', { timeZone: 'America/New_York', day: '2-digit' });
+      return y + '-' + m + '-' + day;
+    }
+
     async function fetchMeetings(startDate, endDate) {
       if (!zohoSDKReady || !ZOHO.CRM || !ZOHO.CRM.API || !ZOHO.CRM.API.coql) {
         throw new Error('Zoho SDK not ready');
       }
 
-      const tz = getTimezoneOffsetString();
+      var tz = getESTOffsetString();
       const startDateTime = `${startDate}T00:00:00${tz}`;
       const endDateTime = `${endDate}T23:59:59${tz}`;
-      const query = `select id,Event_Title,Meeting_Stage,Start_DateTime,End_DateTime,Who_Id,What_Id,Sales_Rep,Sales_Rep_2,Trainee,Venue,Description,District from Events where Start_DateTime between '${startDateTime}' and '${endDateTime}' limit 200`;
-
-      const allMeetings = [];
-      let page = 1;
-      const pageSize = 25;
-      let hasMore = true;
+      const baseQuery = `select id,Event_Title,Meeting_Stage,Start_DateTime,End_DateTime,Who_Id,What_Id,Sales_Rep,Sales_Rep_2,Trainee,Venue,Description,District from Events where Start_DateTime between '${startDateTime}' and '${endDateTime}'`;
+      var pageSize = 200;
+      var allMeetings = [];
+      var offset = 0;
+      var hasMore = true;
+      var maxOffset = 100000;
 
       while (hasMore) {
-        const offset = (page - 1) * pageSize;
-        const coqlQuery = { select_query: query.replace('limit 200', `limit ${pageSize} offset ${offset}`) };
-        const response = await ZOHO.CRM.API.coql(coqlQuery);
+        var coqlQuery = { select_query: baseQuery + " limit " + offset + "," + pageSize };
+        var response = await ZOHO.CRM.API.coql(coqlQuery);
 
         if (response && response.data && response.data.length > 0) {
-          allMeetings.push(...response.data);
-          hasMore = response.info && response.info.more_records === true && response.data.length === pageSize;
+          allMeetings.push.apply(allMeetings, response.data);
+          var moreFromApi = response.info && response.info.more_records === true;
+          var fullPage = response.data.length === pageSize;
+          hasMore = (moreFromApi || fullPage) && (offset + pageSize < maxOffset);
         } else {
           hasMore = false;
         }
-        page++;
-        if (page > 50) break;
-        if (hasMore) await new Promise(r => setTimeout(r, 150));
+        offset += pageSize;
+        if (hasMore) await new Promise(function (r) { setTimeout(r, 150); });
       }
 
       const transformed = [];
+      if (allMeetings.length > 0) {
+        console.log('First meeting What_Id sample:', allMeetings[0].What_Id, 'what_id:', allMeetings[0].what_id);
+      }
       for (const m of allMeetings) {
         if (!m.Start_DateTime) continue;
         let accountId = null;
         let accountName = '';
-        if (m.What_Id) {
-          if (typeof m.What_Id === 'object') {
-            accountId = m.What_Id.id;
-            accountName = m.What_Id.name || '';
+        var whatId = m.What_Id || m.what_id;
+        if (whatId) {
+          if (typeof whatId === 'object') {
+            accountId = whatId.id != null ? whatId.id : whatId;
+            accountName = (whatId.name != null ? whatId.name : '') || '';
           } else {
-            accountId = m.What_Id;
+            accountId = whatId;
           }
         }
         transformed.push({
@@ -577,12 +662,7 @@
           venue: m.Venue || ''
         });
       }
-      return transformed.filter(function (row) {
-        const a = (row.salesRep || '').trim();
-        const b = (row.salesRep2 || '').trim();
-        const c = (row.trainee || '').trim();
-        return a !== '' || b !== '' || c !== '';
-      });
+      return transformed;
     }
 
     function buildSearchText(row) {
@@ -614,11 +694,13 @@
 
       if (data.length === 0) {
         listEl.innerHTML = '<div class="empty">No meetings for this date.</div>';
-        countEl.textContent = '';
+        if (countEl) countEl.textContent = '0 meetings';
         return;
       }
 
       const sorted = [...data].sort((a, b) => (a.startDateTime || '').localeCompare(b.startDateTime || ''));
+
+      if (countEl) countEl.textContent = sorted.length + ' meeting' + (sorted.length !== 1 ? 's' : '');
 
       listEl.innerHTML = sorted.map(row => {
         const stageVal = row.stage === 'None' || !row.stage ? '' : row.stage;
@@ -630,12 +712,13 @@
         const title = escapeHtml(row.meetingTitle || '-');
         const searchText = escapeHtml(buildSearchText(row));
         const origStage = escapeHtml(row.stage || '');
+        var selectDisabled = '';
         return '<div class="card" data-id="' + row.id + '" data-original-stage="' + origStage + '" data-search-text="' + searchText + '">' +
           '<h2 class="card-title">' + title + '</h2>' +
           '<p class="card-meta">' + escapeHtml(row.from) + '</p>' +
           '<div class="card-stage">' +
           '<label>Stage</label>' +
-          '<select name="meeting_stage" data-original-value="' + escapeHtml(stageVal) + '">' + options + '</select>' +
+          '<select name="meeting_stage" data-original-value="' + escapeHtml(stageVal) + '"' + selectDisabled + '>' + options + '</select>' +
           '</div>' +
           '<div class="card-more"><a href="#" data-id="' + row.id + '" class="more-info-link">More Info</a></div>' +
           '</div>';
@@ -664,8 +747,6 @@
       if (total === 0) return;
       if (q) {
         countEl.textContent = 'Showing ' + visible + ' of ' + total + ' meeting' + (total !== 1 ? 's' : '');
-      } else {
-        countEl.textContent = total + ' meeting' + (total !== 1 ? 's' : '');
       }
     }
 
@@ -682,40 +763,224 @@
               const sel = card.querySelector('select[name="meeting_stage"]');
               if (sel) stage = sel.value.trim() || 'None';
             }
-            showDetail(row, stage);
+            showDetail(row, stage).catch(function (err) {
+              console.error('showDetail error:', err);
+            });
           }
         });
       });
     }
 
-    function showDetail(row, currentStage) {
-      const stage = currentStage !== undefined ? currentStage : (row.stage || '-');
-      const fields = [
-        { label: 'Meeting title', value: row.meetingTitle || '-' },
-        { label: 'Date and time', value: row.from || '-' },
-        { label: 'Stage', value: stage || '-' },
-        { label: 'Address / Account', value: row.addressName || '-' },
-        { label: 'Sales rep', value: row.salesRep || '-' },
-        { label: 'Sales rep 2', value: row.salesRep2 || '-' },
-        { label: 'Trainee', value: row.trainee || '-' },
-        { label: 'Venue', value: row.venue || '-' },
-        { label: 'District', value: row.district || '-' },
-        { label: 'Description', value: row.description || '-' }
-      ];
-      const titleEl = document.getElementById('detailTitle');
-      const bodyEl = document.getElementById('detailBody');
-      if (titleEl) titleEl.textContent = row.meetingTitle || 'Meeting details';
-      if (bodyEl) {
-        bodyEl.innerHTML = fields.map(f => '<div class="detail-row">' +
-          '<div class="detail-label">' + escapeHtml(f.label) + '</div>' +
-          '<div class="detail-value">' + escapeHtml(f.value) + '</div>' +
-          '</div>').join('');
+    async function showDetail(row, currentStage) {
+      var accountId = row.accountId != null ? String(row.accountId).trim() : '';
+      console.log('showDetail opened', { meetingId: row.id, accountId: accountId || '(none)' });
+      var titleEl = document.getElementById('detailTitle');
+      var bodyEl = document.getElementById('detailBody');
+      var overlayEl = document.getElementById('detailOverlay');
+      if (!bodyEl || !overlayEl) return;
+
+      if (titleEl) {
+        var meetingTitle = row.meetingTitle || 'Meeting details';
+        if (row.id) {
+          titleEl.innerHTML = '<a href="' + EVENT_LINK_BASE + escapeHtml(String(row.id)) + '" target="_blank" rel="noopener" class="detail-title-link">' + escapeHtml(meetingTitle) + '</a>';
+        } else {
+          titleEl.textContent = meetingTitle;
+        }
       }
-      document.getElementById('detailOverlay').classList.remove('hidden');
+      overlayEl.classList.remove('hidden');
+      bodyEl.innerHTML = '<div class="detail-value">Loading...</div>';
+
+      var account = null;
+      var contacts = [];
+      if (accountId) {
+        console.log('showDetail: fetching account', accountId);
+        try {
+          account = await fetchAccount(accountId);
+          console.log('showDetail: fetchAccount returned', account ? 'data' : 'null');
+          try {
+            contacts = await fetchAccountContacts(accountId);
+          } catch (e) {
+            console.warn('showDetail: fetchAccountContacts failed', e);
+          }
+        } catch (err) {
+          console.error('showDetail fetchAccount failed:', err);
+        }
+      } else {
+        console.log('showDetail: no accountId, skipping address fetch');
+      }
+
+      var fullAddress = '-';
+      var accountNameVal = '-';
+      var brand = '-';
+      var desc = '-';
+      var phone = '-';
+      if (account && typeof account === 'object') {
+        fullAddress = account.Full_Address || account.full_address || account.Full_Address__s || '';
+        accountNameVal = account.Account_Name || account.account_name || account.Account_Name__s || '';
+        brand = account.Brand || account.brand || account.Brand__s || '';
+        desc = account.Description || account.description || account.Description__s || '';
+        phone = account.Phone || account.phone || account.Phone__s || '';
+        if (!fullAddress) fullAddress = '-';
+        if (!accountNameVal) accountNameVal = '-';
+        if (!brand) brand = '-';
+        if (!desc) desc = '-';
+        if (!phone) phone = '-';
+      }
+
+      var addressDisplay = accountId
+        ? '<a href="' + ACCOUNT_LINK_BASE + escapeHtml(accountId) + '" target="_blank" rel="noopener">' + escapeHtml(row.addressName || '-') + '</a>'
+        : (row.addressName || '-');
+
+      var accountHtml = '';
+      if (accountId) {
+        accountHtml = '<div class="detail-section-title">Address</div>' +
+          renderDetailRow('Address / Account', addressDisplay, true) +
+          renderDetailRow('Full address', fullAddress, false) +
+          renderDetailRow('Account name', accountNameVal, false) +
+          renderDetailRow('Brand', brand, false) +
+          renderDetailRow('Description', desc, false) +
+          renderDetailRow('Phone', phone, false);
+        if (contacts && contacts.length > 0) {
+          accountHtml += '<div class="detail-section-title">Home owner</div>';
+          for (var c = 0; c < contacts.length; c++) {
+            var contact = contacts[c];
+            var contactName = contact.Full_Name || contact.full_name || (contact.First_Name || '') + ' ' + (contact.Last_Name || '') || contact.First_Name || contact.Last_Name || '-';
+            var contactPhone = contact.Phone || contact.Mobile || contact.phone || contact.mobile || '-';
+            accountHtml += renderDetailRow('Name', contactName.trim() || '-', false) +
+              renderDetailRow('Phone', contactPhone, false);
+          }
+        }
+      }
+
+      var stage = currentStage !== undefined ? currentStage : (row.stage || '-');
+      var meetingFields = [
+        { label: 'Date and time', value: row.from || '-', html: false },
+        { label: 'Stage', value: stage || '-', html: false },
+        { label: 'Sales rep', value: row.salesRep || '-', html: false },
+        { label: 'Sales rep 2', value: row.salesRep2 || '-', html: false },
+        { label: 'Trainee', value: row.trainee || '-', html: false },
+        { label: 'Venue', value: row.venue || '-', html: false },
+        { label: 'District', value: row.district || '-', html: false },
+        { label: 'Description', value: row.description || '-', html: false }
+      ];
+      var meetingHtml = '<div class="detail-section-title">Meeting</div>' +
+        meetingFields.map(function (f) { return renderDetailRow(f.label, f.value, f.html); }).join('');
+
+      bodyEl.innerHTML = accountHtml + meetingHtml;
     }
 
     function closeDetail() {
       document.getElementById('detailOverlay').classList.add('hidden');
+    }
+
+    function parseHomeOwnerName(val) {
+      if (val == null || val === '') return '';
+      if (typeof val === 'object' && val.name != null) return val.name;
+      if (typeof val === 'string') {
+        try {
+          const o = JSON.parse(val);
+          return o && o.name != null ? o.name : val;
+        } catch (e) {
+          return val;
+        }
+      }
+      return String(val);
+    }
+
+    function normalizeAccountRecord(rec) {
+      if (!rec || typeof rec !== 'object') return null;
+      var out = {};
+      var keys = ['Full_Address', 'Account_Name', 'Brand', 'Description', 'Home_Owner_Name', 'Phone'];
+      var altKeys = ['full_address', 'account_name', 'brand', 'description', 'home_owner_name', 'phone'];
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        var val = rec[k] != null ? rec[k] : (rec[altKeys[i]] != null ? rec[altKeys[i]] : (rec[k + '__s'] != null ? rec[k + '__s'] : ''));
+        if (typeof val === 'object' && val !== null && typeof val.name !== 'undefined') val = val.name;
+        out[k] = val;
+      }
+      return out;
+    }
+
+    async function fetchAccount(accountId) {
+      if (!zohoSDKReady || !ZOHO.CRM || !ZOHO.CRM.API) {
+        console.log('fetchAccount: SDK not ready');
+        return null;
+      }
+      accountId = String(accountId).trim();
+      if (!accountId) return null;
+      console.log('fetchAccount: calling API for accountId', accountId);
+
+      var account = null;
+
+      if (ZOHO.CRM.API.getRecord) {
+        try {
+          var resp = await ZOHO.CRM.API.getRecord({ Entity: 'Accounts', RecordID: accountId });
+          console.log('fetchAccount: getRecord response', resp);
+          if (resp && resp.data) {
+            account = Array.isArray(resp.data) ? resp.data[0] : resp.data;
+          } else if (resp && resp.details) {
+            account = resp.details;
+          } else if (resp && typeof resp === 'object' && !Array.isArray(resp) && (resp.Account_Name != null || resp.Full_Address != null || resp.id != null)) {
+            account = resp;
+          }
+          if (account && typeof account.getKeyValue === 'function') {
+            account = {
+              Full_Address: account.getKeyValue('Full_Address'),
+              Account_Name: account.getKeyValue('Account_Name'),
+              Brand: account.getKeyValue('Brand'),
+              Description: account.getKeyValue('Description'),
+              Home_Owner_Name: account.getKeyValue('Home_Owner_Name'),
+              Phone: account.getKeyValue('Phone')
+            };
+          } else if (account && typeof account === 'object') {
+            account = normalizeAccountRecord(account) || account;
+          }
+        } catch (e) {
+          console.warn('fetchAccount getRecord failed:', accountId, e);
+        }
+      }
+
+      if (!account && ZOHO.CRM.API.coql) {
+        try {
+          var idEsc = accountId.replace(/'/g, "''");
+          var coqlQuery = { select_query: "select Full_Address,Account_Name,Brand,Description,Home_Owner_Name,Phone from Accounts where id = '" + idEsc + "' limit 1" };
+          var coqlResp = await ZOHO.CRM.API.coql(coqlQuery);
+          console.log('fetchAccount: coql response', coqlResp);
+          account = (coqlResp && coqlResp.data && coqlResp.data[0]) || null;
+        } catch (e) {
+          console.warn('fetchAccount coql failed:', accountId, e);
+        }
+      }
+
+      console.log('fetchAccount: returning', account ? 'record' : 'null');
+      return account;
+    }
+
+    async function fetchAccountContacts(accountId) {
+      if (!zohoSDKReady || !ZOHO.CRM || !ZOHO.CRM.API || !ZOHO.CRM.API.getRelatedRecords || !accountId) return [];
+      try {
+        var resp = await ZOHO.CRM.API.getRelatedRecords({
+          Entity: 'Accounts',
+          RecordID: String(accountId),
+          RelatedList: 'Contacts',
+          page: 1,
+          per_page: 200
+        });
+        var list = (resp && resp.data) ? resp.data : [];
+        return Array.isArray(list) ? list : [];
+      } catch (e) {
+        console.warn('fetchAccountContacts failed:', accountId, e);
+        return [];
+      }
+    }
+
+    function renderDetailRow(label, value, isHtml) {
+      if (value == null && !isHtml) value = '';
+      const val = isHtml ? value : escapeHtml(String(value || '-'));
+      return '<div class="detail-row">' +
+        '<div class="detail-label">' + escapeHtml(label) + '</div>' +
+        '<div class="detail-value">' + val + '</div>' +
+        '</div>';
     }
 
     function isMeetingForCurrentUser(row) {
@@ -732,7 +997,11 @@
       try {
         const range = getDateRangeForFilter(filter, startDate, endDate);
         let data = await fetchMeetings(range.start, range.end);
-        data = data.filter(isMeetingForCurrentUser);
+        var canUnlockAll = ((currentUserName || '').trim().toLowerCase() === 'dhinesh' || (currentUserName || '').trim().toLowerCase() === 'taha');
+        var showAllMeetings = canUnlockAll && !isLocked;
+        if (!showAllMeetings) {
+          data = data.filter(isMeetingForCurrentUser);
+        }
         currentData = data;
         renderList(currentData);
         document.getElementById('globalSearch').value = currentSearchQuery;
@@ -843,6 +1112,17 @@
       if (e.target === this) closeDetail();
     });
 
+    document.getElementById('unlockToggle').addEventListener('change', function () {
+      isLocked = !this.checked;
+      if (currentFilter === 'between') {
+        var start = document.getElementById('startDate').value;
+        var end = document.getElementById('endDate').value;
+        loadData('between', start, end);
+      } else {
+        loadData(currentFilter);
+      }
+    });
+
     document.getElementById('refreshBtn').addEventListener('click', function () {
       if (currentFilter === 'between') {
         const start = document.getElementById('startDate').value;
@@ -903,6 +1183,9 @@
           currentUserName = user ? (user.full_name || user.first_name || user.last_name || '').trim() : '';
           const titleEl = document.getElementById('headerTitle');
           if (titleEl) titleEl.textContent = currentUserName ? currentUserName + ' - Meetings' : 'Meetings';
+          var nameLower = (currentUserName || '').toLowerCase();
+          var unlockWrap = document.getElementById('unlockToggleWrap');
+          if (unlockWrap) unlockWrap.classList.add('hidden');
         } catch (err) {
           console.log('getCurrentUser error:', err);
           const titleEl = document.getElementById('headerTitle');
