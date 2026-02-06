@@ -423,6 +423,48 @@
       border-bottom: 1px solid #e5e7eb;
     }
     .detail-section-title:first-child { margin-top: 0; }
+    .detail-section-title.detail-sub { font-size: 12px; margin-top: 8px; }
+    .homeowner-carousel-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #f3f4f6;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .homeowner-carousel-row:active { opacity: 0.9; }
+    .homeowner-carousel-left { flex: 1; min-width: 0; }
+    .homeowner-carousel-left .homeowner-name {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: #1a1a1a;
+    }
+    .homeowner-carousel-left .homeowner-label {
+      display: block;
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 2px;
+    }
+    .homeowner-chevron {
+      font-size: 18px;
+      font-weight: 300;
+      color: #2563eb;
+      margin-left: 8px;
+      flex-shrink: 0;
+      transition: transform 0.2s ease;
+    }
+    .homeowner-carousel-row.homeowner-row-expanded .homeowner-chevron {
+      transform: rotate(90deg);
+    }
+    .homeowner-details-collapsed {
+      display: none;
+    }
+    .homeowner-details-collapsed.homeowner-details-expanded {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -663,11 +705,12 @@
         throw new Error('Zoho SDK not ready');
       }
 
-      var tz = getESTOffsetString();
-      const startDateTime = `${startDate}T00:00:00${tz}`;
-      const endDateTime = `${endDate}T23:59:59${tz}`;
-      const baseQuery = `select id,Event_Title,Meeting_Stage,Start_DateTime,End_DateTime,Who_Id,What_Id,Sales_Rep,Sales_Rep_2,Trainee,Venue,Description,District from Events where Start_DateTime between '${startDateTime}' and '${endDateTime}'`;
+      var tz = getTimezoneOffsetString();
+      const startDateTime = startDate + 'T00:00:00' + tz;
+      const endDateTime = endDate + 'T23:59:59' + tz;
+      const baseQuery = `select id,Event_Title,Meeting_Stage,Start_DateTime,End_DateTime,Who_Id,What_Id,Sales_Rep,Sales_Rep_2,Trainee,Venue,Description,District,Setter,Promoter,Confirmer,Products from Events where Start_DateTime between '${startDateTime}' and '${endDateTime}'`;
       var pageSize = 200;
+      console.log('Meetings COQL (base):', baseQuery);
       var allMeetings = [];
       var offset = 0;
       var hasMore = true;
@@ -706,6 +749,17 @@
             accountId = whatId;
           }
         }
+        var setterVal = m.Setter;
+        var promoterVal = m.Promoter;
+        var confirmerVal = m.Confirmer;
+        var productsVal = m.Products;
+        if (typeof setterVal === 'object' && setterVal != null) setterVal = setterVal.name != null ? setterVal.name : '';
+        if (typeof promoterVal === 'object' && promoterVal != null) promoterVal = promoterVal.name != null ? promoterVal.name : '';
+        if (typeof confirmerVal === 'object' && confirmerVal != null) confirmerVal = confirmerVal.name != null ? confirmerVal.name : '';
+        if (typeof productsVal === 'object' && productsVal != null) {
+          productsVal = Array.isArray(productsVal) ? productsVal.map(function (p) { return p && p.name ? p.name : p; }).join(', ') : (productsVal.name != null ? productsVal.name : '');
+        }
+        productsVal = (productsVal != null && productsVal !== '') ? String(productsVal) : '';
         transformed.push({
           id: m.id,
           stage: m.Meeting_Stage || '',
@@ -715,6 +769,10 @@
           salesRep: m.Sales_Rep || '',
           salesRep2: m.Sales_Rep_2 || '',
           trainee: m.Trainee || '',
+          setter: (setterVal != null && setterVal !== '') ? String(setterVal) : '',
+          promoter: (promoterVal != null && promoterVal !== '') ? String(promoterVal) : '',
+          confirmer: (confirmerVal != null && confirmerVal !== '') ? String(confirmerVal) : '',
+          products: productsVal,
           accountId,
           addressName: accountName || m.Event_Title || '-',
           description: m.Description || '',
@@ -734,6 +792,10 @@
         row.salesRep || '',
         row.salesRep2 || '',
         row.trainee || '',
+        row.setter || '',
+        row.promoter || '',
+        row.confirmer || '',
+        row.products || '',
         row.description || '',
         row.district || '',
         row.venue || ''
@@ -758,7 +820,11 @@
         return;
       }
 
-      const sorted = [...data].sort((a, b) => (a.startDateTime || '').localeCompare(b.startDateTime || ''));
+      const sorted = [...data].sort((a, b) => {
+        var t1 = (a.startDateTime ? new Date(a.startDateTime).getTime() : 0);
+        var t2 = (b.startDateTime ? new Date(b.startDateTime).getTime() : 0);
+        return t1 - t2;
+      });
 
       if (countEl) countEl.textContent = sorted.length + ' meeting' + (sorted.length !== 1 ? 's' : '');
 
@@ -928,64 +994,100 @@
         console.log('showDetail: no accountId, skipping address fetch');
       }
 
-      var fullAddress = '-';
-      var accountNameVal = '-';
-      var brand = '-';
-      var desc = '-';
-      var phone = '-';
+      var fullAddress = '';
+      var accountNameVal = '';
+      var brand = '';
       if (account && typeof account === 'object') {
         fullAddress = account.Full_Address || account.full_address || account.Full_Address__s || '';
         accountNameVal = account.Account_Name || account.account_name || account.Account_Name__s || '';
         brand = account.Brand || account.brand || account.Brand__s || '';
-        desc = account.Description || account.description || account.Description__s || '';
-        phone = account.Phone || account.phone || account.Phone__s || '';
-        if (!fullAddress) fullAddress = '-';
-        if (!accountNameVal) accountNameVal = '-';
-        if (!brand) brand = '-';
-        if (!desc) desc = '-';
-        if (!phone) phone = '-';
       }
 
-      var addressDisplay = accountId
-        ? '<a href="' + ACCOUNT_LINK_BASE + escapeHtml(accountId) + '" target="_blank" rel="noopener">' + escapeHtml(row.addressName || '-') + '</a>'
-        : (row.addressName || '-');
+      var brandVal = (brand && String(brand).trim()) || '-';
 
-      var accountHtml = '';
-      if (accountId) {
-        accountHtml = '<div class="detail-section-title">Address</div>' +
-          renderDetailRow('Address / Account', addressDisplay, true) +
-          renderDetailRow('Full address', fullAddress, false) +
-          renderDetailRow('Account name', accountNameVal, false) +
-          renderDetailRow('Brand', brand, false) +
-          renderDetailRow('Description', desc, false) +
-          renderDetailRow('Phone', phone, false);
-        if (contacts && contacts.length > 0) {
-          accountHtml += '<div class="detail-section-title">Home owner</div>';
-          for (var c = 0; c < contacts.length; c++) {
-            var contact = contacts[c];
-            var contactName = contact.Full_Name || contact.full_name || (contact.First_Name || '') + ' ' + (contact.Last_Name || '') || contact.First_Name || contact.Last_Name || '-';
-            var contactPhone = contact.Phone || contact.Mobile || contact.phone || contact.mobile || '-';
-            accountHtml += renderDetailRow('Name', contactName.trim() || '-', false) +
-              renderDetailRow('Phone', contactPhone, false);
-          }
+      var addressForMaps = (fullAddress && fullAddress.trim()) || row.addressName || '';
+      var addressTrimmed = addressForMaps ? addressForMaps.trim() : '';
+      var addrLower = addressTrimmed.toLowerCase();
+      var skipMapsLink = !addressTrimmed || addrLower === 'unable' || addrLower === 'unabel' || addrLower.indexOf('unable') === 0;
+      var addressDisplay = addressTrimmed
+        ? (skipMapsLink ? escapeHtml(addressTrimmed) : '<a href="https://www.google.com/maps/search/?api=1&amp;query=' + escapeHtml(encodeURIComponent(addressTrimmed)) + '" target="_blank" rel="noopener">' + escapeHtml(addressTrimmed) + '</a>')
+        : '-';
+
+      var html = '';
+
+      html += '<div class="detail-section-title">Address</div>' +
+        '<div class="detail-row"><div class="detail-value">' + addressDisplay + '</div></div>';
+
+      if (contacts && contacts.length > 0) {
+        var contactsData = contacts.map(function (c) {
+          var firstName = c.First_Name || c.first_name || '';
+          var lastName = c.Last_Name || c.last_name || '';
+          var displayName = [firstName, lastName].filter(Boolean).join(' ').trim() || (c.Full_Name || c.full_name || '-');
+          return {
+            displayName: displayName,
+            firstName: firstName || '-',
+            lastName: lastName || '-',
+            phone: (c.Phone || c.Mobile || c.phone || c.mobile || '-'),
+            email: (c.Email || c.email || '-')
+          };
+        });
+        var namesText = contactsData.map(function (c) { return c.displayName; }).join(', ');
+        var contactsJson = JSON.stringify(contactsData).replace(/<\//g, '<\\/');
+        html += '<div class="detail-section-title">HomeOwners</div>';
+        html += '<script type="application/json" id="detailHomeownerContacts">' + contactsJson + '<\/script>';
+        html += '<div class="homeowner-carousel-row homeowner-collapsible" id="homeownerCarouselRow" role="button" tabindex="0">';
+        html += '<div class="homeowner-carousel-left"><span class="homeowner-name">' + escapeHtml(namesText) + '</span></div>';
+        html += '<span class="homeowner-chevron" aria-hidden="true">&#8250;</span>';
+        html += '</div>';
+        html += '<div id="homeownerDetails" class="homeowner-details-collapsed">';
+        for (var ci = 0; ci < contactsData.length; ci++) {
+          var c = contactsData[ci];
+          if (contactsData.length > 1) html += '<div class="detail-section-title detail-sub">Homeowner ' + (ci + 1) + '</div>';
+          html += renderDetailRow('First name', c.firstName, false) + renderDetailRow('Last name', c.lastName, false) + renderDetailRow('Phone', c.phone, false) + renderDetailRow('Email', c.email, false);
         }
+        html += '</div>';
+      } else {
+        html += '<div class="detail-section-title">HomeOwners</div>';
+        html += '<div class="homeowner-carousel-row homeowner-collapsible" id="homeownerCarouselRowSingle" role="button" tabindex="0">';
+        html += '<div class="homeowner-carousel-left"><span class="homeowner-name">' + escapeHtml(accountNameVal || (row.addressName || '-')) + '</span></div>';
+        html += '<span class="homeowner-chevron" aria-hidden="true">&#8250;</span>';
+        html += '</div>';
+        html += '<div id="homeownerDetailsSingle" class="homeowner-details-collapsed"></div>';
       }
 
-      var stage = currentStage !== undefined ? currentStage : (row.stage || '-');
-      var meetingFields = [
-        { label: 'Date and time', value: row.from || '-', html: false },
-        { label: 'Stage', value: stage || '-', html: false },
-        { label: 'Sales rep', value: row.salesRep || '-', html: false },
-        { label: 'Sales rep 2', value: row.salesRep2 || '-', html: false },
-        { label: 'Trainee', value: row.trainee || '-', html: false },
-        { label: 'Venue', value: row.venue || '-', html: false },
-        { label: 'District', value: row.district || '-', html: false },
-        { label: 'Description', value: row.description || '-', html: false }
-      ];
-      var meetingHtml = '<div class="detail-section-title">Meeting</div>' +
-        meetingFields.map(function (f) { return renderDetailRow(f.label, f.value, f.html); }).join('');
+      html += '<div class="detail-section-title">Meeting details</div>' +
+        renderDetailRow('Products', row.products || '-', false) +
+        renderDetailRow('Brand', brandVal, false) +
+        renderDetailRow('Setter', row.setter || '-', false) +
+        renderDetailRow('Promoter', row.promoter || '-', false) +
+        renderDetailRow('Confirmer', row.confirmer || '-', false) +
+        renderDetailRow('Sales Rep', row.salesRep || '-', false) +
+        renderDetailRow('Sales Rep 2', row.salesRep2 || '-', false) +
+        renderDetailRow('Trainee', row.trainee || '-', false);
 
-      bodyEl.innerHTML = accountHtml + meetingHtml;
+      html += '<div class="detail-section-title">Description</div>' +
+        renderDetailRow('Description', row.description || '-', false);
+
+      bodyEl.innerHTML = html;
+      attachHomeownerCarousel();
+    }
+
+    function attachHomeownerCarousel() {
+      var row = document.getElementById('homeownerCarouselRow');
+      var rowSingle = document.getElementById('homeownerCarouselRowSingle');
+      var detailsEl = document.getElementById('homeownerDetails');
+      var detailsSingle = document.getElementById('homeownerDetailsSingle');
+
+      function toggleRow(r, details) {
+        if (!r || !details) return;
+        r.addEventListener('click', function () {
+          r.classList.toggle('homeowner-row-expanded');
+          details.classList.toggle('homeowner-details-expanded');
+        });
+      }
+
+      toggleRow(row, detailsEl);
+      toggleRow(rowSingle, detailsSingle);
     }
 
     function closeDetail() {
@@ -1009,8 +1111,8 @@
     function normalizeAccountRecord(rec) {
       if (!rec || typeof rec !== 'object') return null;
       var out = {};
-      var keys = ['Full_Address', 'Account_Name', 'Brand', 'Description', 'Home_Owner_Name', 'Phone'];
-      var altKeys = ['full_address', 'account_name', 'brand', 'description', 'home_owner_name', 'phone'];
+      var keys = ['Full_Address', 'Account_Name', 'Brand', 'Description', 'Home_Owner_Name', 'Phone', 'Products'];
+      var altKeys = ['full_address', 'account_name', 'brand', 'description', 'home_owner_name', 'phone', 'products'];
       for (var i = 0; i < keys.length; i++) {
         var k = keys[i];
         var val = rec[k] != null ? rec[k] : (rec[altKeys[i]] != null ? rec[altKeys[i]] : (rec[k + '__s'] != null ? rec[k + '__s'] : ''));
@@ -1062,7 +1164,7 @@
       if (!account && ZOHO.CRM.API.coql) {
         try {
           var idEsc = accountId.replace(/'/g, "''");
-          var coqlQuery = { select_query: "select Full_Address,Account_Name,Brand,Description,Home_Owner_Name,Phone from Accounts where id = '" + idEsc + "' limit 1" };
+          var coqlQuery = { select_query: "select Full_Address,Account_Name,Brand,Description,Home_Owner_Name,Phone,Products from Accounts where id = '" + idEsc + "' limit 1" };
           var coqlResp = await ZOHO.CRM.API.coql(coqlQuery);
           console.log('fetchAccount: coql response', coqlResp);
           account = (coqlResp && coqlResp.data && coqlResp.data[0]) || null;
@@ -1116,7 +1218,7 @@
       try {
         const range = getDateRangeForFilter(filter, startDate, endDate);
         let data = await fetchMeetings(range.start, range.end);
-        var canUnlockAll = ((currentUserName || '').trim().toLowerCase() === 'dhinesh' || (currentUserName || '').trim().toLowerCase() === 'taha');
+        var canUnlockAll = (currentUserName || '').trim().toLowerCase() === 'dhinesh';
         var showAllMeetings = canUnlockAll && !isLocked;
         if (!showAllMeetings) {
           data = data.filter(isMeetingForCurrentUser);
