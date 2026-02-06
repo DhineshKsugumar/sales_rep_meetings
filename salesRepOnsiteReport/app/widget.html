@@ -210,6 +210,10 @@
     .card-more {
       margin-top: 12px;
       font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
     }
     .card-more a {
       color: #2563eb;
@@ -217,6 +221,19 @@
       font-weight: 500;
     }
     .card-more a:active { opacity: 0.8; }
+    .card-more .add-notes-btn {
+      margin-left: auto;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #2563eb;
+      background: transparent;
+      border: 1px solid #2563eb;
+      border-radius: 8px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .card-more .add-notes-btn:active { opacity: 0.8; }
 
     .footer-actions {
       position: sticky;
@@ -259,16 +276,34 @@
     }
     .modal-overlay.hidden { display: none; }
     .modal {
+      position: relative;
       background: #fff;
       border-radius: 12px;
       padding: 20px;
       width: 100%;
       max-width: 360px;
     }
+    .modal .close-btn {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      font-size: 1.5rem;
+      line-height: 1;
+      color: #6b7280;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .modal .close-btn:active { color: #1a1a1a; }
     .modal h2 {
       margin: 0 0 16px 0;
       font-size: 1.1rem;
       font-weight: 600;
+      padding-right: 36px;
     }
     .modal .field {
       margin-bottom: 12px;
@@ -286,6 +321,16 @@
       border-radius: 8px;
       font-size: 14px;
       min-height: 44px;
+    }
+    .modal .field textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 14px;
+      min-height: 120px;
+      resize: vertical;
+      font-family: inherit;
     }
     .modal-actions {
       display: flex;
@@ -428,6 +473,21 @@
       <button type="button" class="close-btn" id="detailClose" aria-label="Close">&times;</button>
       <h2 id="detailTitle">Meeting details</h2>
       <div class="detail-body" id="detailBody"></div>
+    </div>
+  </div>
+
+  <div id="notesOverlay" class="modal-overlay hidden">
+    <div class="modal">
+      <button type="button" class="close-btn" id="notesClose" aria-label="Close">&times;</button>
+      <h2 id="notesTitle">Add notes</h2>
+      <div class="field">
+        <label for="notesContent">Notes</label>
+        <textarea id="notesContent" rows="6" placeholder="Enter notes..."></textarea>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="notesCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="notesSave">Save</button>
+      </div>
     </div>
   </div>
 
@@ -720,12 +780,13 @@
           '<label>Stage</label>' +
           '<select name="meeting_stage" data-original-value="' + escapeHtml(stageVal) + '"' + selectDisabled + '>' + options + '</select>' +
           '</div>' +
-          '<div class="card-more"><a href="#" data-id="' + row.id + '" class="more-info-link">More Info</a></div>' +
+          '<div class="card-more"><a href="#" data-id="' + row.id + '" class="more-info-link">More Info</a><button type="button" data-id="' + row.id + '" class="add-notes-btn">Add notes</button></div>' +
           '</div>';
       }).join('');
 
       applySearchFilter(currentSearchQuery);
       attachMoreInfoHandlers();
+      attachAddNotesHandlers();
     }
 
     function applySearchFilter(query) {
@@ -769,6 +830,64 @@
           }
         });
       });
+    }
+
+    var currentNotesMeetingId = null;
+
+    function attachAddNotesHandlers() {
+      document.querySelectorAll('.add-notes-btn').forEach(btn => {
+        btn.addEventListener('click', function (e) {
+          e.preventDefault();
+          const id = this.getAttribute('data-id');
+          const row = currentData.find(r => String(r.id) === String(id));
+          if (!row) return;
+          currentNotesMeetingId = row.id;
+          var titleEl = document.getElementById('notesTitle');
+          if (titleEl) titleEl.textContent = 'Add notes' + (row.meetingTitle ? ': ' + row.meetingTitle : '');
+          var textarea = document.getElementById('notesContent');
+          if (textarea) textarea.value = row.description || '';
+          document.getElementById('notesOverlay').classList.remove('hidden');
+          if (textarea) textarea.focus();
+        });
+      });
+    }
+
+    function closeNotesOverlay() {
+      currentNotesMeetingId = null;
+      document.getElementById('notesOverlay').classList.add('hidden');
+    }
+
+    async function saveNotes() {
+      var id = currentNotesMeetingId;
+      var textarea = document.getElementById('notesContent');
+      var content = textarea ? textarea.value.trim() : '';
+      if (!id || !zohoSDKReady || !ZOHO.CRM || !ZOHO.CRM.API) return;
+      var updateRecord = ZOHO.CRM.API.updateRecord;
+      var addNotes = ZOHO.CRM.API.addNotes;
+      if (!updateRecord || !addNotes) return;
+      try {
+        setLoaderMessage('Saving notes...');
+        showLoader(true);
+        await ZOHO.CRM.API.updateRecord({
+          Entity: 'Events',
+          APIData: { id: String(id), Description: content }
+        });
+        await ZOHO.CRM.API.addNotes({
+          Entity: 'Events',
+          RecordID: String(id),
+          Title: 'Note',
+          Content: content
+        });
+        var row = currentData.find(function (r) { return String(r.id) === String(id); });
+        if (row) row.description = content;
+        closeNotesOverlay();
+      } catch (err) {
+        console.error('saveNotes error:', err);
+        alert('Failed to save notes: ' + (err.message || err));
+      } finally {
+        showLoader(false);
+        setLoaderMessage('');
+      }
     }
 
     async function showDetail(row, currentStage) {
@@ -1110,6 +1229,13 @@
     document.getElementById('detailClose').addEventListener('click', closeDetail);
     document.getElementById('detailOverlay').addEventListener('click', function (e) {
       if (e.target === this) closeDetail();
+    });
+
+    document.getElementById('notesSave').addEventListener('click', function () { saveNotes(); });
+    document.getElementById('notesCancel').addEventListener('click', closeNotesOverlay);
+    document.getElementById('notesClose').addEventListener('click', closeNotesOverlay);
+    document.getElementById('notesOverlay').addEventListener('click', function (e) {
+      if (e.target === this) closeNotesOverlay();
     });
 
     document.getElementById('unlockToggle').addEventListener('change', function () {
