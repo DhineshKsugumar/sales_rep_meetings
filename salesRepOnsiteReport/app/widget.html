@@ -643,34 +643,37 @@
       } else {
         switch (filter) {
           case 'today': {
-            var estToday = getTodayEST();
-            return { start: estToday, end: estToday };
+            var cstToday = getDateInCST(0);
+            return { start: cstToday, end: cstToday };
           }
-          case 'yesterday':
-            startDate = new Date(today);
-            startDate.setDate(startDate.getDate() - 1);
-            endDate = new Date(startDate);
-            break;
-          case 'tomorrow':
-            startDate = new Date(today);
-            startDate.setDate(startDate.getDate() + 1);
-            endDate = new Date(startDate);
-            break;
-          case 'this-week':
-            startDate = new Date(today);
-            startDate.setDate(today.getDate() - today.getDay());
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 6);
-            break;
-          case 'previous-week':
-            startDate = new Date(today);
-            startDate.setDate(today.getDate() - today.getDay() - 7);
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 6);
-            break;
-          default:
-            startDate = new Date(today);
-            endDate = new Date(today);
+          case 'yesterday': {
+            var cstYesterday = getDateInCST(-1);
+            return { start: cstYesterday, end: cstYesterday };
+          }
+          case 'tomorrow': {
+            var cstTomorrow = getDateInCST(1);
+            return { start: cstTomorrow, end: cstTomorrow };
+          }
+          case 'this-week': {
+            var cstStr = getDateInCST(0);
+            var parts = cstStr.split('-');
+            var y = parseInt(parts[0], 10), mo = parseInt(parts[1], 10) - 1, day = parseInt(parts[2], 10);
+            var utcMidnightCST = new Date(Date.UTC(y, mo, day, 6, 0, 0));
+            var dayOfWeek = utcMidnightCST.getUTCDay();
+            return { start: getDateInCST(-dayOfWeek), end: getDateInCST(6 - dayOfWeek) };
+          }
+          case 'previous-week': {
+            var cstStr = getDateInCST(0);
+            var parts = cstStr.split('-');
+            var y = parseInt(parts[0], 10), mo = parseInt(parts[1], 10) - 1, day = parseInt(parts[2], 10);
+            var utcMidnightCST = new Date(Date.UTC(y, mo, day, 6, 0, 0));
+            var dayOfWeek = utcMidnightCST.getUTCDay();
+            return { start: getDateInCST(-dayOfWeek - 7), end: getDateInCST(-dayOfWeek - 1) };
+          }
+          default: {
+            var cstToday = getDateInCST(0);
+            return { start: cstToday, end: cstToday };
+          }
         }
       }
 
@@ -711,11 +714,11 @@
       return sign + String(Math.abs(hours)).padStart(2, '0') + ':' + String(mins).padStart(2, '0');
     }
 
-    /** Return timezone offset for America/New_York (EST/EDT) so COQL range matches onsite report. */
-    function getESTOffsetString() {
+    /** Return timezone offset for America/Chicago (CST/CDT) so COQL range matches meeting data. */
+    function getCSTOffsetString() {
       try {
         const d = new Date();
-        const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'shortOffset' });
+        const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', timeZoneName: 'shortOffset' });
         const parts = formatter.formatToParts(d);
         const tzPart = parts.find(function (p) { return p.type === 'timeZoneName'; });
         const str = (tzPart && tzPart.value) || '';
@@ -727,15 +730,16 @@
           return sign + hours + ':' + mins;
         }
       } catch (e) { /* fallback */ }
-      return '-05:00';
+      return '-06:00';
     }
 
-    /** Return today's date (YYYY-MM-DD) in America/New_York to match onsite report. */
-    function getTodayEST() {
+    /** Return date (YYYY-MM-DD) in America/Chicago for today + offsetDays. */
+    function getDateInCST(offsetDays) {
       const d = new Date();
-      const y = d.toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric' });
-      const m = d.toLocaleString('en-US', { timeZone: 'America/New_York', month: '2-digit' });
-      const day = d.toLocaleString('en-US', { timeZone: 'America/New_York', day: '2-digit' });
+      d.setTime(d.getTime() + offsetDays * 86400000);
+      const y = d.toLocaleString('en-US', { timeZone: 'America/Chicago', year: 'numeric' });
+      const m = d.toLocaleString('en-US', { timeZone: 'America/Chicago', month: '2-digit' });
+      const day = d.toLocaleString('en-US', { timeZone: 'America/Chicago', day: '2-digit' });
       return y + '-' + m + '-' + day;
     }
 
@@ -744,7 +748,7 @@
         throw new Error('Zoho SDK not ready');
       }
 
-      var tz = getTimezoneOffsetString();
+      var tz = getCSTOffsetString();
       const startDateTime = startDate + 'T00:00:00' + tz;
       const endDateTime = endDate + 'T23:59:59' + tz;
       const baseQuery = `select id,Event_Title,Meeting_Stage,Start_DateTime,End_DateTime,Who_Id,What_Id,Sales_Rep,Sales_Rep_2,Trainee,Venue,Description,District,Setter,Promoter,Confirmer,Products from Events where Start_DateTime between '${startDateTime}' and '${endDateTime}'`;
