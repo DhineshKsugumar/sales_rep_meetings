@@ -465,6 +465,45 @@
     .homeowner-details-collapsed.homeowner-details-expanded {
       display: block;
     }
+    .detail-notes-container { margin-top: 4px; }
+    .note-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #f3f4f6;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .note-row:last-of-type { border-bottom: none; }
+    .note-row:active { opacity: 0.9; }
+    .note-preview {
+      flex: 1;
+      min-width: 0;
+      font-size: 13px;
+      color: #1a1a1a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .note-row .note-chevron {
+      font-size: 16px;
+      color: #2563eb;
+      margin-left: 8px;
+      flex-shrink: 0;
+      transition: transform 0.2s ease;
+    }
+    .note-row.note-expanded .note-chevron { transform: rotate(90deg); }
+    .note-full {
+      display: none;
+      padding: 8px 0 12px 0;
+      font-size: 13px;
+      color: #374151;
+      white-space: pre-wrap;
+      word-break: break-word;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .note-row.note-expanded + .note-full { display: block; }
   </style>
 </head>
 <body>
@@ -928,24 +967,17 @@
       var textarea = document.getElementById('notesContent');
       var content = textarea ? textarea.value.trim() : '';
       if (!id || !zohoSDKReady || !ZOHO.CRM || !ZOHO.CRM.API) return;
-      var updateRecord = ZOHO.CRM.API.updateRecord;
       var addNotes = ZOHO.CRM.API.addNotes;
-      if (!updateRecord || !addNotes) return;
+      if (!addNotes) return;
       try {
         setLoaderMessage('Saving notes...');
         showLoader(true);
-        await ZOHO.CRM.API.updateRecord({
-          Entity: 'Events',
-          APIData: { id: String(id), Description: content }
-        });
         await ZOHO.CRM.API.addNotes({
           Entity: 'Events',
           RecordID: String(id),
           Title: 'Note',
           Content: content
         });
-        var row = currentData.find(function (r) { return String(r.id) === String(id); });
-        if (row) row.description = content;
         closeNotesOverlay();
       } catch (err) {
         console.error('saveNotes error:', err);
@@ -1068,8 +1100,11 @@
       html += '<div class="detail-section-title">Description</div>' +
         renderDetailRow('Description', row.description || '-', false);
 
+      html += '<div class="detail-section-title">Notes</div><div id="detailNotesContainer" class="detail-notes-container">Loading...</div>';
+
       bodyEl.innerHTML = html;
       attachHomeownerCarousel();
+      fetchAndRenderMeetingNotes(row.id, document.getElementById('detailNotesContainer'));
     }
 
     function attachHomeownerCarousel() {
@@ -1088,6 +1123,57 @@
 
       toggleRow(row, detailsEl);
       toggleRow(rowSingle, detailsSingle);
+    }
+
+    async function fetchAndRenderMeetingNotes(meetingId, containerEl) {
+      if (!containerEl || !zohoSDKReady || !ZOHO.CRM || !ZOHO.CRM.API || !ZOHO.CRM.API.getRelatedRecords) {
+        if (containerEl) containerEl.innerHTML = '<div class="detail-value">-</div>';
+        return;
+      }
+      meetingId = String(meetingId).trim();
+      if (!meetingId) {
+        containerEl.innerHTML = '<div class="detail-value">-</div>';
+        return;
+      }
+      try {
+        var resp = await ZOHO.CRM.API.getRelatedRecords({
+          Entity: 'Events',
+          RecordID: meetingId,
+          RelatedList: 'Notes',
+          page: 1,
+          per_page: 200
+        });
+        var list = (resp && resp.data) ? resp.data : [];
+        var notes = Array.isArray(list) ? list : [];
+        if (notes.length === 0) {
+          containerEl.innerHTML = '<div class="detail-value">No notes.</div>';
+          return;
+        }
+        var truncateLen = 60;
+        var html = '';
+        for (var i = 0; i < notes.length; i++) {
+          var n = notes[i];
+          var title = n.Note_Title || n.Note_Title__s || '';
+          var content = (n.Note_Content || n.Note_Content__s || '').trim().replace(/<[^>]*>/g, '');
+          var preview = (title ? title + ' – ' : '') + content;
+          if (preview.length > truncateLen) preview = preview.substring(0, truncateLen) + '…';
+          if (!preview) preview = 'Note ' + (i + 1);
+          html += '<div class="note-row" id="noteRow' + i + '" role="button" tabindex="0" data-note-index="' + i + '">';
+          html += '<span class="note-preview">' + escapeHtml(preview) + '</span>';
+          html += '<span class="note-chevron" aria-hidden="true">&#8250;</span>';
+          html += '</div>';
+          html += '<div class="note-full">' + escapeHtml(content || '-') + '</div>';
+        }
+        containerEl.innerHTML = html;
+        containerEl.querySelectorAll('.note-row').forEach(function (row) {
+          row.addEventListener('click', function () {
+            this.classList.toggle('note-expanded');
+          });
+        });
+      } catch (e) {
+        console.warn('fetchAndRenderMeetingNotes failed:', e);
+        containerEl.innerHTML = '<div class="detail-value">Unable to load notes.</div>';
+      }
     }
 
     function closeDetail() {
